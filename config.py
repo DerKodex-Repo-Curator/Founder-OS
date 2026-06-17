@@ -27,6 +27,8 @@ class Config:
     voice_replies: bool          # speak responses back to voice messages
     dashboard_enabled: bool      # serve the local web dashboard
     dashboard_port: int
+    dashboard_api_port: int
+    web_origin: str              # CORS origins for React dashboard (comma-separated)
     daily_llm_call_cap: int      # 0 = unlimited
     agent_paused: bool           # kill switch
 
@@ -96,6 +98,8 @@ def load_config() -> Config:
         voice_replies=os.getenv("VOICE_REPLIES", "true").strip().lower() in ("1", "true", "yes", "on"),
         dashboard_enabled=os.getenv("DASHBOARD_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
         dashboard_port=int(os.getenv("DASHBOARD_PORT", "8787") or "8787"),
+        dashboard_api_port=int(os.getenv("DASHBOARD_API_PORT", "8788") or "8788"),
+        web_origin=os.getenv("WEB_ORIGIN", "http://localhost:3000").strip(),
         daily_llm_call_cap=int(os.getenv("DAILY_LLM_CALL_CAP", "0") or "0"),
         agent_paused=os.getenv("AGENT_PAUSED", "false").strip().lower() in ("1", "true", "yes", "on"),
         ollama_enabled=os.getenv("OLLAMA_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on"),

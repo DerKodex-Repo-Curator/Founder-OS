@@ -19,7 +19,9 @@ services:
         max-size: "10m"
         max-file: "3"
     # The bot uses Telegram long-polling, so NO inbound/public port is required.
-    # The web dashboard binds to localhost INSIDE the container. To view it on a
-    # remote server, enable host networking (Linux only) and SSH-tunnel in:
-    #   ssh -L 8787:localhost:8787 <user>@<server>
+    # The dashboard API binds to localhost INSIDE the container (port 8788).
+    # To view it from your laptop, SSH-tunnel (works on AWS EC2, Hetzner, Oracle, etc.):
+    #   ssh -L 8788:127.0.0.1:8788 -i key.pem ubuntu@<server-ip>
+    # Then run the React app locally (web/) with NEXT_PUBLIC_API_URL=http://localhost:8788
+    # Full AWS walkthrough: docs/DEPLOY_AWS.md
     # network_mode: host

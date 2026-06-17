@@ -17,6 +17,7 @@ from config import config
 
 os.makedirs("./data/logs", exist_ok=True)
 os.makedirs("./data/chroma", exist_ok=True)
+os.makedirs("./data/context", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,10 +38,10 @@ def main():
 
     if config.dashboard_enabled:
         try:
-            from dashboard.app import start_in_thread
+            from api.server import start_in_thread
             start_in_thread()
         except Exception as e:
-            logger.warning(f"Dashboard failed to start: {e}")
+            logger.warning(f"Dashboard API failed to start: {e}")
 
     logger.info("Bot is running. Send a message on Telegram to start.")
     app.run_polling(drop_pending_updates=True)

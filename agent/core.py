@@ -49,10 +49,15 @@ async def run(user_message: str, image_context: str = "", actor: str = "user",
 
     mem_ctx = _memory_context(user_message)
     try:
+        from context.resolver import build_context_block
+        ctx_block = build_context_block(user_message)
+    except Exception:
+        ctx_block = ""
+    try:
         world_ctx = world_model.snapshot_block()
     except Exception:
         world_ctx = ""
-    extra = "\n\n".join(x for x in [world_ctx, mem_ctx] if x)
+    extra = "\n\n".join(x for x in [world_ctx, mem_ctx, ctx_block] if x)
 
     skills_block, lessons_block, goals_block = evolution.retrieve_context(user_message)
     system_prompt = identity.build_system_prompt(
