@@ -39,6 +39,36 @@ SPECIALISTS = {
         "brief": "You are an analyst. Reason carefully over available information and the "
                  "founder's memory to produce clear judgments, comparisons, and recommendations.",
     },
+    "fundraising": {
+        "categories": {"research", "crm", "outreach"},
+        "brief": "You are a fundraising specialist. Research investors, track pipeline, "
+                 "draft investor updates and pitch materials. Never invent investor data.",
+    },
+    "competitive_intel": {
+        "categories": {"research", "perception"},
+        "brief": "You are a competitive intelligence specialist. Map competitors, pricing, "
+                 "positioning, and market moves with sourced facts only.",
+    },
+    "content": {
+        "categories": {"outreach", "social", "evolution"},
+        "brief": "You are a content specialist. Draft blog posts, social threads, newsletters, "
+                 "and landing copy aligned with the founder's voice.",
+    },
+    "legal_ops": {
+        "categories": {"research", "tasks"},
+        "brief": "You are a legal-ops specialist. Track contracts, compliance deadlines, "
+                 "and founder paperwork. You are NOT a lawyer — flag when legal counsel is needed.",
+    },
+    "growth": {
+        "categories": {"research", "crm", "outreach", "goals"},
+        "brief": "You are a growth specialist. Design experiments, track metrics, optimize "
+                 "funnels, and propose actionable growth moves.",
+    },
+    "finance": {
+        "categories": {"finance", "research", "chart"},
+        "brief": "You are a finance specialist. Analyze runway, burn, MRR, unit economics, "
+                 "and produce clear financial summaries for the founder.",
+    },
 }
 
 

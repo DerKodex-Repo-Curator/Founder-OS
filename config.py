@@ -54,6 +54,15 @@ class Config:
     x_access_token: str
     x_access_token_secret: str
     x_bearer_token: str
+    # Agent swarm
+    swarm_enabled: bool
+    swarm_max_agents: int
+    swarm_max_rounds: int
+    swarm_max_handoffs: int
+    debate_rounds: int
+    swarm_worker_mode: str       # inproc | sqlite | redis
+    redis_url: str
+    langgraph_adapter: bool
 
 def load_config() -> Config:
     missing = []
@@ -119,6 +128,14 @@ def load_config() -> Config:
         x_access_token=os.getenv("X_ACCESS_TOKEN", ""),
         x_access_token_secret=os.getenv("X_ACCESS_TOKEN_SECRET", ""),
         x_bearer_token=os.getenv("X_BEARER_TOKEN", ""),
+        swarm_enabled=os.getenv("SWARM_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
+        swarm_max_agents=int(os.getenv("SWARM_MAX_AGENTS", "5") or "5"),
+        swarm_max_rounds=int(os.getenv("SWARM_MAX_ROUNDS", "10") or "10"),
+        swarm_max_handoffs=int(os.getenv("SWARM_MAX_HANDOFFS", "5") or "5"),
+        debate_rounds=int(os.getenv("DEBATE_ROUNDS", "2") or "2"),
+        swarm_worker_mode=os.getenv("SWARM_WORKER_MODE", "sqlite").strip().lower(),
+        redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0").strip(),
+        langgraph_adapter=os.getenv("LANGGRAPH_ADAPTER", "false").strip().lower() in ("1", "true", "yes", "on"),
     )
 
 config = load_config()

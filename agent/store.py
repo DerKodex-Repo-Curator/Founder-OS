@@ -133,6 +133,61 @@ def init_agent_db():
             msg_key TEXT PRIMARY KEY,          -- Message-ID (or synthetic key)
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS swarm_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            goal TEXT NOT NULL,
+            topology TEXT,
+            agent_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'running',     -- running | done | failed
+            result TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            finished_at TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS swarm_board (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER REFERENCES swarm_runs(id),
+            agent TEXT NOT NULL,
+            entry_type TEXT NOT NULL,          -- init | finding | claim | validation | critique
+            content TEXT NOT NULL,
+            salience REAL DEFAULT 1.0,
+            parent_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS swarm_agents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            role TEXT DEFAULT 'worker',        -- explorer | worker | validator
+            specialty TEXT,
+            pheromone REAL DEFAULT 1.0,
+            workload INTEGER DEFAULT 0,
+            successes INTEGER DEFAULT 0,
+            trials INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS swarm_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL UNIQUE,
+            job_type TEXT NOT NULL,
+            payload_json TEXT,
+            priority INTEGER DEFAULT 5,
+            status TEXT DEFAULT 'pending',     -- pending | running | done | failed
+            result TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            finished_at TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS swarm_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER,
+            from_agent TEXT,
+            to_agent TEXT,
+            content TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """
     )
     # Migrate older usage_daily rows that predate token/cost columns.
@@ -579,6 +634,163 @@ def usage_history(days: int = 7) -> list:
     conn = get_conn()
     rows = conn.execute(
         "SELECT * FROM usage_daily ORDER BY day DESC LIMIT ?", (days,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── SWARM ─────────────────────────────────────────────────────────────────────
+
+def create_swarm_run(goal: str, topology: str, agent_count: int = 0) -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        "INSERT INTO swarm_runs (goal, topology, agent_count) VALUES (?, ?, ?)",
+        (goal, topology, agent_count),
+    )
+    conn.commit()
+    rid = cur.lastrowid
+    conn.close()
+    return rid
+
+
+def finish_swarm_run(run_id: int, status: str, result: str = ""):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE swarm_runs SET status = ?, result = ?, finished_at = ? WHERE id = ?",
+        (status, result, datetime.now().isoformat(), run_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_swarm_runs(limit: int = 20) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM swarm_runs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def board_post(run_id: int, agent: str, entry_type: str, content: str,
+               salience: float = 1.0, parent_id: int = None) -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        "INSERT INTO swarm_board (run_id, agent, entry_type, content, salience, parent_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (run_id, agent, entry_type, content[:4000], salience, parent_id),
+    )
+    conn.commit()
+    eid = cur.lastrowid
+    conn.close()
+    return eid
+
+
+def board_read(run_id: int, limit: int = 20, min_salience: float = 0.0) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM swarm_board WHERE run_id = ? AND salience >= ? "
+        "ORDER BY salience DESC, id DESC LIMIT ?",
+        (run_id, min_salience, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def upsert_swarm_agent(name: str, role: str, pheromone: float = 1.0, specialty: str = ""):
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO swarm_agents (name, role, pheromone, specialty, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(name) DO UPDATE SET
+             role = ?, pheromone = ?, specialty = ?, updated_at = ?""",
+        (name, role, pheromone, specialty, datetime.now().isoformat(),
+         role, pheromone, specialty, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_swarm_agents(role: str = None) -> list:
+    conn = get_conn()
+    if role:
+        rows = conn.execute(
+            "SELECT * FROM swarm_agents WHERE role = ? ORDER BY pheromone DESC", (role,)
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM swarm_agents ORDER BY pheromone DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_swarm_agent_pheromone(name: str, success: bool, delta: float = 0.1):
+    conn = get_conn()
+    row = conn.execute("SELECT pheromone, successes, trials FROM swarm_agents WHERE name = ?", (name,)).fetchone()
+    if not row:
+        conn.close()
+        return
+    p = float(row["pheromone"])
+    p = min(3.0, max(0.1, p + delta if success else p - delta * 0.5))
+    conn.execute(
+        "UPDATE swarm_agents SET pheromone = ?, successes = successes + ?, trials = trials + 1, updated_at = ? WHERE name = ?",
+        (p, 1 if success else 0, datetime.now().isoformat(), name),
+    )
+    conn.commit()
+    conn.close()
+
+
+def enqueue_swarm_job(job_id: str, job_type: str, payload_json: str, priority: int = 5):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO swarm_jobs (job_id, job_type, payload_json, priority) VALUES (?, ?, ?, ?)",
+        (job_id, job_type, payload_json, priority),
+    )
+    conn.commit()
+    conn.close()
+
+
+def dequeue_swarm_job() -> dict:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM swarm_jobs WHERE status = 'pending' ORDER BY priority DESC, id ASC LIMIT 1"
+    ).fetchone()
+    if not row:
+        conn.close()
+        return {}
+    conn.execute(
+        "UPDATE swarm_jobs SET status = 'running' WHERE job_id = ?", (row["job_id"],)
+    )
+    conn.commit()
+    conn.close()
+    import json as _json
+    return {"id": row["job_id"], "type": row["job_type"], "payload": _json.loads(row["payload_json"] or "{}")}
+
+
+def finish_swarm_job(job_id: str, status: str, result: str = ""):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE swarm_jobs SET status = ?, result = ?, finished_at = ? WHERE job_id = ?",
+        (status, result, datetime.now().isoformat(), job_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def post_swarm_message(run_id: int, from_agent: str, to_agent: str, content: str):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO swarm_messages (run_id, from_agent, to_agent, content) VALUES (?, ?, ?, ?)",
+        (run_id, from_agent, to_agent, content[:4000]),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_swarm_messages(run_id: int, limit: int = 50) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM swarm_messages WHERE run_id = ? ORDER BY id DESC LIMIT ?",
+        (run_id, limit),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
