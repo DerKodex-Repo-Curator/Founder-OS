@@ -265,6 +265,7 @@ async def job_heartbeat():
         return
     logger.info("[Scheduler] Heartbeat")
     from agent import core
+    from config import config
     prompt = (
         "[HEARTBEAT] This is an autonomous self-check, not a user message. Review my "
         "active goals, any follow-ups due, pending reminders, and pipeline. If there is "
@@ -276,6 +277,21 @@ async def job_heartbeat():
         reply = await core.run(prompt, actor="heartbeat")
         if reply and reply.strip().upper() != "NOTHING":
             await send_to_user(f"🛰 *Proactive update*\n\n{reply}")
+        # Proactive swarm pass on active goals (budget-aware)
+        if getattr(config, "swarm_enabled", True):
+            try:
+                from agent.swarm.proactive import run_proactive_swarm
+                swarm_res = await run_proactive_swarm(context=reply or "")
+                if swarm_res.get("results"):
+                    lines = [f"🐝 *Swarm advanced {swarm_res['goals_processed']} goal(s):*"]
+                    for r in swarm_res["results"][:2]:
+                        syn = r.get("result", {}).get("synthesis", "")[:300]
+                        if syn:
+                            lines.append(f"• {r.get('goal', '?')[:80]}: {syn[:200]}")
+                    if len(lines) > 1:
+                        await send_to_user("\n".join(lines))
+            except Exception as e:
+                logger.debug(f"[Scheduler] Proactive swarm skipped: {e}")
     except Exception as e:
         logger.error(f"Heartbeat failed: {e}")
 
