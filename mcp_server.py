@@ -50,6 +50,21 @@ async def run_tool(name: str, arguments: dict):
     return await registry.call(name, arguments)
 
 
+# Swarm coordination primitives for external MCP agents (Cursor, Claude Desktop).
+SWARM_MCP_TOOLS = [
+    "run_swarm", "delegate", "delegate_parallel", "handoff_start", "handoff_to",
+    "run_debate", "run_mesh", "run_blackboard", "board_post", "board_read",
+    "enqueue_swarm_job", "list_swarm_runs", "swarm_status", "run_hierarchical_swarm",
+]
+
+
+def swarm_tool_specs() -> list:
+    """Subset of tools for external swarm peer coordination."""
+    all_names = {t.name for t in registry.all_tools()}
+    return [(n, registry.get(n).description, registry.get(n).parameters)
+            for n in SWARM_MCP_TOOLS if n in all_names]
+
+
 def build_server():
     from mcp.server import Server
     import mcp.types as types
@@ -72,6 +87,7 @@ async def main_stdio():
     from mcp.server.stdio import stdio_server
     server = build_server()
     logger.info(f"Founder OS MCP server: exposing {len(registry.all_tools())} tools over stdio.")
+    logger.info(f"Swarm peer tools available: {', '.join(SWARM_MCP_TOOLS)}")
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
 

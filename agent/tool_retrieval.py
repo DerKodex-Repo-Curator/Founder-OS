@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 _CORE = {
     "search_memory", "deep_recall", "save_memory", "world_state",
     "delegate", "delegate_parallel", "about_self",
+    "run_swarm", "handoff_start", "handoff_to", "run_debate",
+    "run_mesh", "run_blackboard", "swarm_status", "route_topology",
 }
 
 _embed = None

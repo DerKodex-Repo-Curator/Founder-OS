@@ -13,7 +13,10 @@ from agent import subagent
     parameters={
         "type": "object",
         "properties": {
-            "specialist": {"type": "string", "enum": ["researcher", "outreach", "ops", "analyst"]},
+            "specialist": {"type": "string", "enum": [
+                "researcher", "outreach", "ops", "analyst",
+                "fundraising", "competitive_intel", "content", "legal_ops", "growth", "finance",
+            ]},
             "task": {"type": "string", "description": "A clear, self-contained instruction."},
         },
         "required": ["specialist", "task"],
