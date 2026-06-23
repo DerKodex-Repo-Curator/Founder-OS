@@ -85,3 +85,47 @@ def render_plan(plan: dict) -> str:
         desc = s.get("description") if isinstance(s, dict) else str(s)
         lines.append(f"{i}. {desc}")
     return "\n".join(lines)
+
+
+async def replan_on_failure(goal: str, failed_step: str, error: str,
+                            completed_steps: list = None, context: str = "") -> dict:
+    """Adaptive replanning: regenerate plan preserving completed work after a failure."""
+    from config import config
+    if not getattr(config, "healing_auto_replan", True):
+        return {"steps": [], "rationale": "replan disabled", "plan_id": None}
+
+    completed = completed_steps or []
+    done_text = "\n".join(f"- DONE: {s}" for s in completed) if completed else "(none)"
+    messages = [
+        {"role": "system", "content":
+            "You are the replanning module. A step failed during execution. "
+            "Generate a NEW plan that preserves completed work and routes around the failure. "
+            "Respond ONLY with JSON."},
+        {"role": "user", "content": f"""GOAL: {goal}
+
+COMPLETED:
+{done_text}
+
+FAILED STEP: {failed_step}
+ERROR: {error[:400]}
+
+CONTEXT: {context or '(none)'}
+
+Respond ONLY with JSON:
+{{"rationale": "...", "steps": [{{"description": "...", "depends_on": []}}]}}"""},
+    ]
+    try:
+        raw = await complete(messages, task_type="analysis", max_tokens=500)
+        from agent.healing.repair import repair_json_output
+        data = repair_json_output(raw)
+        if data.get("error"):
+            return {"steps": [], "rationale": "", "plan_id": None}
+        steps = data.get("steps") or []
+        rationale = data.get("rationale", "")
+        plan_id = None
+        if steps:
+            plan_id = store.create_plan(f"[REPLAN] {goal[:400]}", rationale, steps)
+        return {"steps": steps, "rationale": rationale, "plan_id": plan_id, "replanned": True}
+    except Exception as e:
+        logger.debug(f"[planner] replan failed: {e}")
+        return {"steps": [], "rationale": "", "plan_id": None}
