@@ -15,7 +15,7 @@
 > looks after your goals — all behind a human approval gate for anything risky.
 
 Founder OS is not a chatbot. It is an **autonomous agent**: you tell it an outcome, and
-it decides which of its **100 tools** to call (retrieving only the relevant ones per turn
+it decides which of its **107 tools** to call (retrieving only the relevant ones per turn
 via Tool-RAG), chains them, verifies its own work, and
 gets things done — then quietly improves itself for next time.
 
@@ -26,7 +26,8 @@ gets things done — then quietly improves itself for next time.
 - **True agentic loop** — not intent-routing. The model sees the full tool catalog and decides what to do (ReAct-style tool calling), with a **Plan → Execute → Verify** pipeline on top.
 - **Self-evolving** — it distills lessons, saves reusable skills, rewrites its own operating manual, and can even **author brand-new tools for itself** at runtime (Voyager-style), all behind approval.
 - **A real memory brain** — vector + relational + a **knowledge graph**, with **hybrid retrieval** (dense + BM25 + optional reranker), episodic recall weighted by recency/importance, and **nightly consolidation** ("sleep").
-- **Multi-agent swarm** — a supervisor that **delegates** to 10 specialist sub-agents, with **12 orchestration paths**: parallel fan-out, dynamic handoff, debate, mesh, blackboard/stigmergy, bio-inspired SwarmSys, hierarchical hybrid, proactive heartbeat swarms, self-evolving skills, MCP external peers, optional LangGraph adapter, and distributed SQLite/Redis workers.
+- **Multi-agent swarm** — supervisor + 10 specialists, 12 orchestration paths (parallel fan-out, handoff, debate, mesh, blackboard, SwarmSys, hierarchical, proactive, self-evolving, MCP, LangGraph, distributed workers).
+- **Self-healing** — a bounded `monitor->detect->diagnose->recover->verify` control plane wraps every tool and LLM call: retry/backoff, circuit breakers, argument repair, tool substitution, stuck-loop detection, checkpoint/rollback, adaptive replan, watchdog self-test, failure ledger, and human escalation — 28 techniques across 6 layers.
 - **Perception** — reads your inbox (IMAP), renders JS-heavy web pages (headless browser), transcribes voice notes (local Whisper), parses PDFs/DOCX, and runs topic monitors.
 - **Safety-first autonomy** — an inviolable **constitution**, **prompt-injection defense**, **tiered autonomy** (cautious/balanced/autonomous), an **approval gate**, **spend caps**, and a **kill switch**.
 - **Observable** — a per-turn **flight recorder** (tracing), token/cost tracking, a **self-eval harness** with a tracked pass rate, and a **replay** tool.
@@ -43,11 +44,12 @@ gets things done — then quietly improves itself for next time.
 5. [Quickstart & setup](#5-quickstart--setup)
 6. [Configuration reference (.env)](#6-configuration-reference-env)
 7. [The agentic core in depth](#7-the-agentic-core-in-depth)
-8. [The complete tool catalog (100 tools)](#8-the-complete-tool-catalog-100-tools)
+8. [The complete tool catalog (107 tools)](#8-the-complete-tool-catalog-107-tools)
 9. [The memory brain](#9-the-memory-brain)
 10. [Self-evolution](#10-self-evolution)
-11. [Multi-agent orchestration](#11-multi-agent-orchestration)
-12. [Perception layer](#12-perception-layer)
+11. [Multi-agent swarm orchestration](#11-multi-agent-swarm-orchestration)
+12. [Self-healing control plane](#12-self-healing-control-plane)
+13. [Perception layer](#13-perception-layer)
 13. [Safety, policy & control](#13-safety-policy--control)
 14. [Observability: tracing, cost, evals, replay](#14-observability-tracing-cost-evals-replay)
 15. [LLM routing, caching & local models](#15-llm-routing-caching--local-models)
@@ -600,7 +602,7 @@ manual and re-injected forever after.
 
 ---
 
-## 8. The complete tool catalog (100 tools)
+## 8. The complete tool catalog (107 tools)
 
 Tools are grouped by `category`. **Yes** in the Approval column means the tool is
 approval-gated (won't run until you approve, unless `AUTONOMY_LEVEL=autonomous` /
@@ -932,11 +934,130 @@ Every swarm agent runs through **`execute_loop`** — policy, approvals, injecti
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis queue URL (optional). |
 | `LANGGRAPH_ADAPTER` | `false` | Enable optional LangGraph adapter (`pip install langgraph`). |
 
+### Self-healing
+
+| Variable | Default | Description |
+|---|---|---|
+| `HEALING_ENABLED` | `true` | Master switch for self-healing control plane. |
+| `HEALING_MAX_RECOVERIES` | `4` | Per-turn recovery budget. |
+| `HEALING_RETRY_MAX` | `3` | Max retries per call with backoff. |
+| `HEALING_BACKOFF_BASE_MS` | `200` | Base backoff delay (ms). |
+| `CIRCUIT_FAIL_THRESHOLD` | `5` | Failures before circuit opens. |
+| `CIRCUIT_COOLDOWN_S` | `30` | Cooldown before half-open probe. |
+| `HEALING_METACOG` | `true` | MASC-style step anomaly detection. |
+| `HEALING_AUTO_REPLAN` | `true` | Adaptive replan on step failure. |
+| `HEALING_ESCALATE` | `true` | Telegram escalation after budget exhausted. |
+| `WATCHDOG_ENABLED` | `true` | Periodic self-test scheduler job. |
+| `WATCHDOG_MINUTES` | `30` | Watchdog interval (minutes). |
+
 Sub-agents share the same memory brain, so everything they learn or write is centralized.
 
 ---
 
-## 12. Perception layer
+## 12. Self-healing control plane
+
+Founder OS implements a **complete self-healing layer** (`agent/healing/`) that wraps every LLM and tool call through a bounded `monitor -> detect -> diagnose -> recover -> verify` control loop. When something fails, the system classifies the failure, picks the cheapest recovery action that fits, and only escalates to the founder when its recovery budget is exhausted.
+
+```mermaid
+flowchart TD
+    Call[Tool or LLM call] --> CB{Circuit open?}
+    CB -->|yes| Route[Route around or substitute]
+    CB -->|no| Try[Execute with retry and backoff]
+    Try -->|ok| Done[Return result]
+    Try -->|fail| Diag[Diagnose failure class]
+    Diag --> Pol[Recovery policy plus budget]
+    Pol -->|cheap| Local[Retry / arg-repair / substitute]
+    Pol -->|medium| Reflect[Reflexion / replan]
+    Pol -->|expensive| Roll[Rollback / compensate]
+    Pol -->|exhausted| Esc[Degrade / escalate to founder]
+    Local --> Verify{Verified?}
+    Reflect --> Verify
+    Roll --> Verify
+    Verify -->|no budget left| Diag
+    Verify -->|yes| Done
+    Local --> Ledger[(Failure ledger)]
+    Ledger -.learns.-> Pol
+```
+
+### 12.1 The 28 self-healing techniques
+
+| # | Technique | Layer | Module | Description |
+|---|---|---|---|---|
+| 1 | Retry + exponential backoff + jitter | Infrastructure | `healing/retry.py` | Transient blips retried before failover |
+| 2 | 3-state circuit breaker | Infrastructure | `healing/circuit.py` | CLOSED/OPEN/HALF_OPEN per provider and tool |
+| 3 | Tool fallback chains | Infrastructure | `healing/fallback.py` | tavily->serper->duckduckgo style chains |
+| 4 | Provider health routing | Infrastructure | `llm/router.py` | Adaptive routing by live telemetry |
+| 5 | Failure taxonomy + diagnosis | Execution | `healing/diagnose.py` | Classify timeout/args/wrong-tool/empty/etc. |
+| 6 | Local argument repair | Execution | `healing/repair.py` | Fix malformed args from schema + error |
+| 7 | Self-healing tool router | Execution | `healing/router.py` | Reweight failed tool, route around without LLM |
+| 8 | Tool substitution | Execution | `healing/fallback.py` | scrape_url <-> web_search equivalents |
+| 9 | Stuck-loop detection | Execution | `agent/loop.py` | Break infinite repeat of same failing call |
+| 10 | Step-level reflection | Cognitive | `agent/loop.py` + `critic.py` | Reflect after each step, not just at end |
+| 11 | Metacognitive anomaly detection | Cognitive | `healing/metacog.py` | MASC-style step scoring via local embedder |
+| 12 | Adaptive replanning | Cognitive | `agent/planner.py` | `replan_on_failure()` preserves completed work |
+| 13 | Output schema validation | Cognitive | `healing/repair.py` | JSON auto-repair for malformed LLM output |
+| 14 | Swarm cross-verification | Cognitive | `agent/swarm/debate.py` | Maker-checker as healing primitive |
+| 15 | Checkpoint + rollback | State | `healing/checkpoint.py` | Snapshot per step; roll back on failure |
+| 16 | Compensating transactions | State | `healing/checkpoint.py` | Undo side effects of failed multi-step actions |
+| 17 | Durable replay recovery | State | `scripts/replay.py` | Replay from immutable action_log/traces |
+| 18 | DB + vector self-repair | State | `healing/storage.py` | SQLite reconnect; Chroma/Qdrant liveness |
+| 19 | Watchdog + self-test | System | `healing/watchdog.py` | Periodic health check + auto-remediation |
+| 20 | Generated-tool quarantine | System | `agent/skills_factory.py` | Broken self-authored tools moved to quarantine |
+| 21 | Swarm DLQ + auto-retry | System | `agent/swarm/workers/` | Failed jobs re-queued with backoff |
+| 22 | Bulkhead isolation | System | `agent/swarm/runner.py` | Per-swarm agent caps prevent starvation |
+| 23 | Graceful degradation | System | `healing/escalate.py` | Partial/cached answer instead of total failure |
+| 24 | Human escalation | System | `healing/escalate.py` | Telegram alert after budget exhausted |
+| 25 | Failure ledger / memory | Learning | `healing/ledger.py` | Persist failure->diagnosis->fix patterns |
+| 26 | Recovery-budget policy | Learning | `healing/policy.py` | Cheap local repairs before global recovery |
+| 27 | Self-diagnostic tools | Learning | `agent/tools/healing_tools.py` | `run_self_test`, `health_report`, `heal_now` |
+| 28 | Healing observability | Learning | `agent/trace.py` + `store.py` | Healing events in traces + DB metrics |
+
+### 12.2 Recovery priority (cheapest first)
+
+The recovery policy in `healing/policy.py` always tries local, low-cost repairs before expensive global ones:
+
+1. **Retry / backoff retry** — transient infrastructure blips
+2. **Argument repair** — fix malformed tool args from schema
+3. **Tool substitute / route around** — use equivalent tool without LLM
+4. **Reflexion / replan** — step-level reflection or adaptive replan
+5. **Rollback / compensate** — undo partial state changes
+6. **Degrade** — return partial/cached result with honest explanation
+7. **Escalate** — notify founder on Telegram with diagnosis
+
+### 12.3 Self-healing tools
+
+| Tool | Purpose |
+|---|---|
+| `run_self_test` | Comprehensive subsystem health check |
+| `health_report` | Full report: self-test, failures, circuits, storage |
+| `heal_now` | Trigger immediate self-test + auto-remediation |
+| `failure_log` | List recent failures with diagnosis and recovery actions |
+| `circuit_status` | Show all circuit breaker states |
+| `reset_circuit` | Manually reset a circuit breaker to CLOSED |
+
+### 12.4 Self-healing configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `HEALING_ENABLED` | `true` | Master switch; wraps all tool/LLM calls |
+| `HEALING_MAX_RECOVERIES` | `4` | Per-turn recovery budget (prevents runaway loops) |
+| `HEALING_RETRY_MAX` | `3` | Max retries per call with backoff |
+| `HEALING_BACKOFF_BASE_MS` | `200` | Base backoff delay in milliseconds |
+| `CIRCUIT_FAIL_THRESHOLD` | `5` | Failures before circuit opens |
+| `CIRCUIT_COOLDOWN_S` | `30` | Seconds before half-open probe |
+| `HEALING_METACOG` | `true` | MASC-style step anomaly detection |
+| `HEALING_AUTO_REPLAN` | `true` | Adaptive replan on step failure |
+| `HEALING_ESCALATE` | `true` | Telegram escalation after budget exhausted |
+| `WATCHDOG_ENABLED` | `true` | Periodic self-test scheduler job |
+| `WATCHDOG_MINUTES` | `30` | Watchdog interval in minutes |
+
+### 12.5 Guardrails
+
+Healing **never** bypasses policy, approvals, budget caps, or injection defense. Recovery LLM calls count against `DAILY_LLM_CALL_CAP`. On any healer internal error, the system falls back to the original behavior so healing cannot make things worse.
+
+---
+
+## 13. Perception layer
 
 So the agent can sense the world, not just chat:
 
@@ -1221,7 +1342,7 @@ FOUDNER_OS/
 │   ├── budget.py                # Spend cap, kill switch, cost tracking
 │   ├── trace.py                 # Per-turn flight recorder
 │   ├── store.py                 # Agent SQLite tables + accessors
-│   └── tools/                   # 100 tools across categories
+│   └── tools/                   # 107 tools across categories
 │       ├── __init__.py          # Imports all tool modules (registration) + loads generated
 │       ├── memory_tools.py      ├── brain_tools.py      ├── world_tools.py
 │       ├── crm_tools.py         ├── research_tools.py   ├── outreach_tools.py
@@ -1318,7 +1439,7 @@ you want; the agent picks the tools.
 ### 22.1 Fast local checks (no Telegram)
 
 ```bash
-# All modules import + all 100 tools register
+# All modules import + all 107 tools register
 python -c "import agent.tools, agent.core, scheduler.jobs, bot.handlers; from agent import registry; print('OK -', len(registry.all_tools()), 'tools')"
 
 # Behavior regression (side-effect-free)
@@ -1616,6 +1737,7 @@ Built incrementally, one commit per phase:
 | `feat: LLM-as-judge evals` | A rubric-based judge scores answer quality and safety (drafting, abstention, fraud refusal, approval-gate respect); opt-in CI gate (`RUN_LLM_EVALS=1`) guarding self-evolution, with the harness itself unit-tested offline. `evals/judge.py`, `evals/quality_runner.py`. |
 | `feat: dashboard API + Next.js web UI` | FastAPI JSON backend (`api/`), React dashboard (`web/`), context spaces, AWS deploy docs. |
 | `feat: agent swarm — full 12-path orchestration` | Complete swarm layer (`agent/swarm/`): orchestrator-worker, dynamic handoff, fan-out/fan-in, AdaptOrch topology routing, blackboard/stigmergy, SwarmSys bio-inspired profiles, debate/maker-checker, mesh convergence, hierarchical hybrid, proactive heartbeat swarms, self-evolving skills, MCP external peers, optional LangGraph adapter, SQLite/Redis distributed workers. 10 specialists, 21 swarm tools, 100 total tools. `agent/tools/swarm_tools.py`, `tests/test_swarm.py`. |
+| `feat: self-healing control plane — 28 techniques` | Complete self-healing layer (`agent/healing/`): monitor->detect->diagnose->recover->verify loop with bounded recovery budget. Retry/backoff, 3-state circuit breakers, failure taxonomy, argument repair, tool substitution, self-healing router, stuck-loop detection, MASC metacog, adaptive replan, checkpoint/rollback, compensating transactions, DB/vector self-repair, watchdog self-test, generated-tool quarantine, swarm DLQ retry, graceful degradation, human escalation, failure ledger. 6 healing tools. `tests/test_healing.py` (20 tests). |
 
 ---
 
