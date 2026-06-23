@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import config
-from api.routers import spaces, assets, state, crud
+from api.routers import spaces, assets, state, crud, cognition
 
 
 def create_app() -> FastAPI:
@@ -20,6 +20,7 @@ def create_app() -> FastAPI:
     app.include_router(spaces.router, prefix="/api")
     app.include_router(assets.router, prefix="/api")
     app.include_router(crud.router, prefix="/api")
+    app.include_router(cognition.router, prefix="/api")
     return app
 
 

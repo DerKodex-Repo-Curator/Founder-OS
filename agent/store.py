@@ -230,6 +230,87 @@ def init_agent_db():
             cost_ms INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS principles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            principle TEXT NOT NULL,
+            context TEXT,
+            trace_ids TEXT,
+            support INTEGER DEFAULT 1,
+            success_rate REAL DEFAULT 1.0,
+            effectiveness REAL DEFAULT 1.0,
+            status TEXT DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS twin_transitions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            state_key TEXT NOT NULL,
+            action_key TEXT NOT NULL,
+            outcome_key TEXT,
+            reliability REAL DEFAULT 0.5,
+            trials INTEGER DEFAULT 0,
+            successes INTEGER DEFAULT 0,
+            effect_estimate REAL DEFAULT 0.0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(state_key, action_key, outcome_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS preplay_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trace_id TEXT,
+            tool_name TEXT,
+            candidates_json TEXT,
+            selected_idx INTEGER,
+            predicted_outcome TEXT,
+            actual_outcome TEXT,
+            prediction_error REAL,
+            mode TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS workspace (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            content TEXT NOT NULL,
+            salience REAL DEFAULT 1.0,
+            decay_rate REAL DEFAULT 0.05,
+            coalition TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS founder_model (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            confidence REAL DEFAULT 0.5,
+            evidence_count INTEGER DEFAULT 1,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS trust_scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_type TEXT NOT NULL UNIQUE,
+            competence REAL DEFAULT 0.5,
+            trials INTEGER DEFAULT 0,
+            successes INTEGER DEFAULT 0,
+            failures INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS distill_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            episodes_processed INTEGER DEFAULT 0,
+            principles_added INTEGER DEFAULT 0,
+            principles_updated INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'running',
+            detail TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            finished_at TIMESTAMP
+        );
         """
     )
     # Migrate older usage_daily rows that predate token/cost columns.
@@ -962,6 +1043,285 @@ def list_healing_events(limit: int = 50) -> list:
     conn = get_conn()
     rows = conn.execute(
         "SELECT * FROM healing_events ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── LECE: PRINCIPLES ──────────────────────────────────────────────────────────
+
+def add_principle(principle: str, context: str = "", trace_ids: str = "",
+                  support: int = 1, success_rate: float = 1.0,
+                  effectiveness: float = 1.0, status: str = "active") -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        "INSERT INTO principles (principle, context, trace_ids, support, success_rate, "
+        "effectiveness, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (principle[:2000], context[:1000], trace_ids[:500], support,
+         success_rate, effectiveness, status),
+    )
+    conn.commit()
+    pid = cur.lastrowid
+    conn.close()
+    return pid
+
+
+def update_principle(pid: int, support: int = None, success_rate: float = None,
+                     effectiveness: float = None, status: str = None):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM principles WHERE id = ?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        return
+    r = dict(row)
+    conn.execute(
+        "UPDATE principles SET support=?, success_rate=?, effectiveness=?, status=?, "
+        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (
+            support if support is not None else r["support"],
+            success_rate if success_rate is not None else r["success_rate"],
+            effectiveness if effectiveness is not None else r["effectiveness"],
+            status if status is not None else r["status"],
+            pid,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_principles(status: str = "active", limit: int = 50) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM principles WHERE status = ? ORDER BY effectiveness DESC, id DESC LIMIT ?",
+        (status, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def quarantine_principle(pid: int):
+    update_principle(pid, status="quarantined")
+
+
+# ── LECE: TWIN TRANSITIONS ──────────────────────────────────────────────────
+
+def upsert_twin_transition(state_key: str, action_key: str, outcome_key: str,
+                           success: bool, effect: float = 0.0):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM twin_transitions WHERE state_key=? AND action_key=? AND outcome_key=?",
+        (state_key[:200], action_key[:200], (outcome_key or "")[:200]),
+    ).fetchone()
+    if row:
+        r = dict(row)
+        trials = r["trials"] + 1
+        successes = r["successes"] + (1 if success else 0)
+        rel = successes / max(trials, 1)
+        conn.execute(
+            "UPDATE twin_transitions SET trials=?, successes=?, reliability=?, "
+            "effect_estimate=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (trials, successes, rel, effect, r["id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO twin_transitions (state_key, action_key, outcome_key, reliability, "
+            "trials, successes, effect_estimate) VALUES (?, ?, ?, ?, 1, ?, ?)",
+            (state_key[:200], action_key[:200], (outcome_key or "")[:200],
+             1.0 if success else 0.0, 1 if success else 0, effect),
+        )
+    conn.commit()
+    conn.close()
+
+
+def list_twin_transitions(state_key: str = "", limit: int = 50) -> list:
+    conn = get_conn()
+    if state_key:
+        rows = conn.execute(
+            "SELECT * FROM twin_transitions WHERE state_key=? ORDER BY reliability DESC LIMIT ?",
+            (state_key[:200], limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM twin_transitions ORDER BY trials DESC LIMIT ?", (limit,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── LECE: PREPLAY RUNS ──────────────────────────────────────────────────────
+
+def log_preplay_run(trace_id: str, tool_name: str, candidates_json: str,
+                    selected_idx: int, predicted_outcome: str, actual_outcome: str = "",
+                    prediction_error: float = 0.0, mode: str = "hybrid") -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        "INSERT INTO preplay_runs (trace_id, tool_name, candidates_json, selected_idx, "
+        "predicted_outcome, actual_outcome, prediction_error, mode) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (trace_id, tool_name, candidates_json[:4000], selected_idx,
+         predicted_outcome[:1000], actual_outcome[:1000], prediction_error, mode),
+    )
+    conn.commit()
+    pid = cur.lastrowid
+    conn.close()
+    return pid
+
+
+def list_preplay_runs(limit: int = 30) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM preplay_runs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── LECE: WORKSPACE ───────────────────────────────────────────────────────────
+
+def workspace_post(source: str, content: str, salience: float = 1.0,
+                   decay_rate: float = 0.05, coalition: str = "") -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        "INSERT INTO workspace (source, content, salience, decay_rate, coalition) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (source[:100], content[:4000], salience, decay_rate, coalition[:50]),
+    )
+    conn.commit()
+    wid = cur.lastrowid
+    conn.close()
+    return wid
+
+
+def workspace_read(limit: int = 20, min_salience: float = 0.1) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM workspace WHERE status='active' AND salience >= ? "
+        "ORDER BY salience DESC, id DESC LIMIT ?",
+        (min_salience, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def workspace_decay_all(factor: float = 0.95):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE workspace SET salience = salience * ?, updated_at=CURRENT_TIMESTAMP "
+        "WHERE status='active'",
+        (factor,),
+    )
+    conn.execute(
+        "UPDATE workspace SET status='archived' WHERE status='active' AND salience < 0.05"
+    )
+    conn.commit()
+    conn.close()
+
+
+# ── LECE: FOUNDER MODEL ─────────────────────────────────────────────────────
+
+def set_founder_trait(key: str, value: str, confidence: float = 0.5):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM founder_model WHERE key=?", (key,)).fetchone()
+    if row:
+        r = dict(row)
+        ev = r["evidence_count"] + 1
+        conf = min(0.95, (r["confidence"] * r["evidence_count"] + confidence) / ev)
+        conn.execute(
+            "UPDATE founder_model SET value=?, confidence=?, evidence_count=?, "
+            "updated_at=CURRENT_TIMESTAMP WHERE key=?",
+            (value[:2000], conf, ev, key),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO founder_model (key, value, confidence, evidence_count) VALUES (?, ?, ?, 1)",
+            (key, value[:2000], confidence),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_founder_traits() -> dict:
+    conn = get_conn()
+    rows = conn.execute("SELECT key, value, confidence FROM founder_model").fetchall()
+    conn.close()
+    return {r["key"]: {"value": r["value"], "confidence": r["confidence"]} for r in rows}
+
+
+# ── LECE: TRUST SCORES ────────────────────────────────────────────────────────
+
+def record_trust_outcome(action_type: str, success: bool):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM trust_scores WHERE action_type=?", (action_type,)
+    ).fetchone()
+    if row:
+        r = dict(row)
+        trials = r["trials"] + 1
+        successes = r["successes"] + (1 if success else 0)
+        failures = r["failures"] + (0 if success else 1)
+        comp = successes / max(trials, 1)
+        conn.execute(
+            "UPDATE trust_scores SET trials=?, successes=?, failures=?, competence=?, "
+            "updated_at=CURRENT_TIMESTAMP WHERE action_type=?",
+            (trials, successes, failures, comp, action_type),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO trust_scores (action_type, competence, trials, successes, failures) "
+            "VALUES (?, ?, 1, ?, ?)",
+            (action_type, 1.0 if success else 0.0, 1 if success else 0, 0 if success else 1),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_trust_score(action_type: str) -> dict:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM trust_scores WHERE action_type=?", (action_type,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else {"action_type": action_type, "competence": 0.5, "trials": 0}
+
+
+def list_trust_scores(limit: int = 30) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM trust_scores ORDER BY trials DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── LECE: DISTILL RUNS ────────────────────────────────────────────────────────
+
+def create_distill_run() -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        "INSERT INTO distill_runs (status) VALUES ('running')"
+    )
+    conn.commit()
+    rid = cur.lastrowid
+    conn.close()
+    return rid
+
+
+def finish_distill_run(run_id: int, episodes: int, added: int, updated: int,
+                       status: str = "done", detail: str = ""):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE distill_runs SET episodes_processed=?, principles_added=?, "
+        "principles_updated=?, status=?, detail=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+        (episodes, added, updated, status, detail[:500], run_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_distill_runs(limit: int = 10) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM distill_runs ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]

@@ -34,6 +34,18 @@ def main():
 
     app = ApplicationBuilder().token(config.telegram_bot_token).build()
     register_handlers(app)
+
+    async def _post_init(application):
+        from agent.cognition.loop import start_cognitive_loop
+        start_cognitive_loop(application)
+
+    async def _post_shutdown(application):
+        from agent.cognition.loop import stop_cognitive_loop
+        stop_cognitive_loop()
+
+    app.post_init = _post_init
+    app.post_shutdown = _post_shutdown
+
     start_scheduler(app)
 
     if config.dashboard_enabled:

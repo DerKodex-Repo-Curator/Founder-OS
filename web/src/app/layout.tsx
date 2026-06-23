@@ -6,6 +6,7 @@ import "./globals.css";
 
 const NAV = [
   { href: "/", label: "Overview" },
+  { href: "/cognition", label: "Cognition" },
   { href: "/spaces", label: "Context Spaces" },
   { href: "/data", label: "All Data" },
 ];

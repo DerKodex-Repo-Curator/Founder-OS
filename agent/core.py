@@ -61,11 +61,29 @@ async def run(user_message: str, image_context: str = "", actor: str = "user",
         world_ctx = ""
     extra = "\n\n".join(x for x in [world_ctx, mem_ctx, ctx_block] if x)
 
-    skills_block, lessons_block, goals_block = evolution.retrieve_context(user_message)
+    skills_block, lessons_block, goals_block, principles_block = evolution.retrieve_context(user_message)
+    manual_block = ""
+    workspace_block = ""
+    founder_block = ""
+    try:
+        from config import config
+        if getattr(config, "lece_enabled", True):
+            from agent.cognition.manual import build_manual_prefix
+            from agent.cognition.workspace import broadcast_block
+            from agent.cognition.founder_model import profile_block
+            manual_block = build_manual_prefix()
+            workspace_block = broadcast_block()
+            founder_block = profile_block()
+    except Exception:
+        pass
     system_prompt = identity.build_system_prompt(
         skills_block=skills_block,
         lessons_block=lessons_block,
         goals_block=goals_block,
+        principles_block=principles_block,
+        manual_block=manual_block,
+        workspace_block=workspace_block,
+        founder_block=founder_block,
         extra_context=extra,
     )
 
@@ -159,6 +177,15 @@ async def run(user_message: str, image_context: str = "", actor: str = "user",
     # Fire-and-forget self-evolution on substantive turns.
     if tools_used or len(user_message) > 40:
         asyncio.create_task(_safe_reflect(user_message, final_text, tools_used))
+        try:
+            from config import config
+            if getattr(config, "lece_enabled", True):
+                from agent.cognition.founder_model import learn_from_interaction
+                from agent.cognition.workspace import post_item
+                learn_from_interaction(user_message, final_text, tools_used)
+                post_item("memory", f"Turn: {user_message[:120]}", salience=0.8, coalition="memory")
+        except Exception:
+            pass
 
     return final_text
 

@@ -67,6 +67,13 @@ def schemas_for(categories) -> list:
 
 async def call(name: str, args: dict):
     """Execute a tool by name. Handles sync + async callables."""
+    from agent.cognition.sandbox import should_intercept, simulate_tool_result
+    from agent.cognition import twin
+
+    if should_intercept(name):
+        pred = twin.predict_outcome(twin.build_state_vector(), name, args or {})
+        return simulate_tool_result(name, args, pred)
+
     tool = _TOOLS.get(name)
     if tool is None:
         return {"error": f"Unknown tool: {name}"}

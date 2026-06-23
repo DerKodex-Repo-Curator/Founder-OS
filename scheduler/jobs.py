@@ -232,6 +232,22 @@ async def job_check_inbox():
         logger.error(f"Reply loop failed: {e}")
 
 
+async def job_distill():
+    """Nightly LECE experiential self-distillation."""
+    from config import config
+    if not getattr(config, "lece_enabled", True):
+        return
+    if not getattr(config, "lece_distill_enabled", True):
+        return
+    logger.info("[Scheduler] LECE distillation")
+    try:
+        from agent.cognition.distill import run_distillation
+        res = await run_distillation(limit=150)
+        logger.info(f"[Scheduler] LECE distill: {res}")
+    except Exception as e:
+        logger.error(f"LECE distillation failed: {e}")
+
+
 async def job_consolidate_memory():
     logger.info("[Scheduler] Nightly memory consolidation")
     try:
@@ -337,14 +353,17 @@ def start_scheduler(app) -> AsyncIOScheduler:
     _scheduler.add_job(job_daily_briefing, CronTrigger(hour=8, minute=0), id="daily_briefing")
     _scheduler.add_job(job_followup_reminder, CronTrigger(hour=10, minute=0), id="followup_reminder")
     _scheduler.add_job(job_consolidate_memory, CronTrigger(hour=3, minute=0), id="consolidate_memory")
+    distill_hour = max(0, min(23, int(getattr(config, "lece_distill_hour", 3) or 3)))
+    _scheduler.add_job(job_distill, CronTrigger(hour=distill_hour, minute=30), id="lece_distill")
     _scheduler.add_job(job_backup, CronTrigger(hour=2, minute=0), id="backup")
     _scheduler.add_job(job_check_monitors, CronTrigger(hour="9,15,20", minute=30), id="check_monitors")
     _scheduler.add_job(job_check_inbox, CronTrigger(hour="9-21", minute=15), id="check_inbox")
 
     hours = max(1, int(getattr(config, "heartbeat_hours", 4) or 4))
-    _scheduler.add_job(
-        job_heartbeat, CronTrigger(hour=f"9-21/{hours}", minute=0), id="heartbeat"
-    )
+    if not getattr(config, "lece_workspace_continuous", False):
+        _scheduler.add_job(
+            job_heartbeat, CronTrigger(hour=f"9-21/{hours}", minute=0), id="heartbeat"
+        )
 
     wd_min = max(5, int(getattr(config, "watchdog_minutes", 30) or 30))
     _scheduler.add_job(

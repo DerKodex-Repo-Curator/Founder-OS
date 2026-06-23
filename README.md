@@ -15,7 +15,7 @@
 > looks after your goals — all behind a human approval gate for anything risky.
 
 Founder OS is not a chatbot. It is an **autonomous agent**: you tell it an outcome, and
-it decides which of its **107 tools** to call (retrieving only the relevant ones per turn
+it decides which of its **117 tools** to call (retrieving only the relevant ones per turn
 via Tool-RAG), chains them, verifies its own work, and
 gets things done — then quietly improves itself for next time.
 
@@ -28,6 +28,7 @@ gets things done — then quietly improves itself for next time.
 - **A real memory brain** — vector + relational + a **knowledge graph**, with **hybrid retrieval** (dense + BM25 + optional reranker), episodic recall weighted by recency/importance, and **nightly consolidation** ("sleep").
 - **Multi-agent swarm** — supervisor + 10 specialists, 12 orchestration paths (parallel fan-out, handoff, debate, mesh, blackboard, SwarmSys, hierarchical, proactive, self-evolving, MCP, LangGraph, distributed workers).
 - **Self-healing** — a bounded `monitor->detect->diagnose->recover->verify` control plane wraps every tool and LLM call: retry/backoff, circuit breakers, argument repair, tool substitution, stuck-loop detection, checkpoint/rollback, adaptive replan, watchdog self-test, failure ledger, and human escalation — 28 techniques across 6 layers.
+- **Lived-Experience Cognitive Engine (LECE)** — continually distills principle-level experience from your own traces, simulates high-stakes actions on a business digital twin before acting (preplay), and coordinates cognition via a Global Workspace attention loop with trust-calibrated autonomy — local-first, paper-grade architecture (`docs/LECE.md`).
 - **Perception** — reads your inbox (IMAP), renders JS-heavy web pages (headless browser), transcribes voice notes (local Whisper), parses PDFs/DOCX, and runs topic monitors.
 - **Safety-first autonomy** — an inviolable **constitution**, **prompt-injection defense**, **tiered autonomy** (cautious/balanced/autonomous), an **approval gate**, **spend caps**, and a **kill switch**.
 - **Observable** — a per-turn **flight recorder** (tracing), token/cost tracking, a **self-eval harness** with a tracked pass rate, and a **replay** tool.
@@ -44,12 +45,13 @@ gets things done — then quietly improves itself for next time.
 5. [Quickstart & setup](#5-quickstart--setup)
 6. [Configuration reference (.env)](#6-configuration-reference-env)
 7. [The agentic core in depth](#7-the-agentic-core-in-depth)
-8. [The complete tool catalog (107 tools)](#8-the-complete-tool-catalog-107-tools)
+8. [The complete tool catalog (117 tools)](#8-the-complete-tool-catalog-117-tools)
 9. [The memory brain](#9-the-memory-brain)
 10. [Self-evolution](#10-self-evolution)
 11. [Multi-agent swarm orchestration](#11-multi-agent-swarm-orchestration)
 12. [Self-healing control plane](#12-self-healing-control-plane)
-13. [Perception layer](#13-perception-layer)
+13. [Lived-Experience Cognitive Engine (LECE)](#13-lived-experience-cognitive-engine-lece)
+14. [Perception layer](#13-perception-layer)
 13. [Safety, policy & control](#13-safety-policy--control)
 14. [Observability: tracing, cost, evals, replay](#14-observability-tracing-cost-evals-replay)
 15. [LLM routing, caching & local models](#15-llm-routing-caching--local-models)
@@ -602,7 +604,7 @@ manual and re-injected forever after.
 
 ---
 
-## 8. The complete tool catalog (107 tools)
+## 8. The complete tool catalog (117 tools)
 
 Tools are grouped by `category`. **Yes** in the Approval column means the tool is
 approval-gated (won't run until you approve, unless `AUTONOMY_LEVEL=autonomous` /
@@ -950,6 +952,24 @@ Every swarm agent runs through **`execute_loop`** — policy, approvals, injecti
 | `WATCHDOG_ENABLED` | `true` | Periodic self-test scheduler job. |
 | `WATCHDOG_MINUTES` | `30` | Watchdog interval (minutes). |
 
+### LECE (Lived-Experience Cognitive Engine)
+
+| Variable | Default | Description |
+|---|---|---|
+| `LECE_ENABLED` | `true` | Master switch for LECE cognitive layer. |
+| `LECE_DISTILL_ENABLED` | `true` | Nightly principle distillation (03:30). |
+| `LECE_DISTILL_HOUR` | `3` | Hour for distill job. |
+| `LECE_DISTILL_TRAIN` | `false` | Tier B LoRA training scaffold (GPU optional). |
+| `LECE_TRAIN_BACKEND` | `peft` | Training backend: `peft` or `unsloth`. |
+| `LECE_PRINCIPLES_K` | `4` | Principles retrieved per turn/step. |
+| `LECE_PREPLAY_ENABLED` | `true` | Simulate before high-stakes actions. |
+| `LECE_PREPLAY_MODE` | `hybrid` | `learned` \| `swarm` \| `hybrid`. |
+| `LECE_PREPLAY_BRANCHES` | `3` | Counterfactual branches in preplay. |
+| `LECE_WORKSPACE_CONTINUOUS` | `false` | Continuous Global Workspace loop. |
+| `LECE_WORKSPACE_TICK_S` | `120` | Cognitive loop tick interval (seconds). |
+| `LECE_ADAPTIVE_AUTONOMY` | `true` | Learned trust-calibrated autonomy. |
+| `LECE_TRUST_MIN_TRIALS` | `5` | Min trials before autonomy elevation. |
+
 Sub-agents share the same memory brain, so everything they learn or write is centralized.
 
 ---
@@ -1054,6 +1074,70 @@ The recovery policy in `healing/policy.py` always tries local, low-cost repairs 
 ### 12.5 Guardrails
 
 Healing **never** bypasses policy, approvals, budget caps, or injection defense. Recovery LLM calls count against `DAILY_LLM_CALL_CAP`. On any healer internal error, the system falls back to the original behavior so healing cannot make things worse.
+
+---
+
+## 13. Lived-Experience Cognitive Engine (LECE)
+
+LECE is Founder OS's **research-grade cognitive layer** (`agent/cognition/`). It learns from the founder's own lived agent experience — locally and privately — and applies 2026 frontiers (EvolveR, EvoSC, ProPlay, Global Workspace) to a **single-user longitudinal setting** no cloud agent can replicate.
+
+> Full whitepaper: [`docs/LECE.md`](docs/LECE.md)
+
+```mermaid
+flowchart LR
+    traces[Traces JSONL] --> distill[Principle distillation]
+    distill --> manual[Operating manual]
+    distill --> inject[Step-wise injection]
+    twin[Digital twin] --> preplay[Preplay simulation]
+    preplay --> act[Real action via approval gate]
+    act --> feedback[Expectation feedback]
+    feedback --> twin
+    coalitions[Attention coalitions] --> workspace[Global Workspace]
+    workspace --> core[Deliberative core]
+    ledger[Trust + failure ledger] --> autonomy[Adaptive autonomy]
+```
+
+### 13.1 Three pillars
+
+| Pillar | What it does | Key modules |
+|--------|--------------|-------------|
+| **Experiential self-distillation** | Traces → scored episodes → principles → personalized manual | `episodes.py`, `distill.py`, `principles.py`, `manual.py` |
+| **Business digital twin + preplay** | Procedure graph; sandbox simulation before high-stakes tools | `twin.py`, `sandbox.py`, `preplay.py` |
+| **Global Workspace + adaptive autonomy** | Salience blackboard; learned trust in `policy.decide()` | `workspace.py`, `processes.py`, `founder_model.py`, `trust.py`, `loop.py` |
+
+### 13.2 LECE tools (10 new)
+
+| Tool | Purpose |
+|------|---------|
+| `distill_now` | Run distillation on recent traces |
+| `list_principles` | View learned principles + effectiveness |
+| `preplay_action` | Simulate a high-stakes action on the twin |
+| `simulate_strategy` | Parallel counterfactual rollouts (sandbox) |
+| `twin_state` | Business digital twin snapshot |
+| `why_did_you` | Explain a decision from trace + workspace + preplay |
+| `workspace_state` | Global Workspace blackboard |
+| `trust_report` | Per-action-type competence scores |
+| `founder_profile` | Theory-of-mind model of the founder |
+| `lece_metrics` | Full metrics report |
+
+### 13.3 LECE configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `LECE_ENABLED` | `true` | Master switch |
+| `LECE_DISTILL_ENABLED` | `true` | Nightly distillation (03:30) |
+| `LECE_DISTILL_TRAIN` | `false` | Tier B LoRA scaffold (GPU optional) |
+| `LECE_PREPLAY_ENABLED` | `true` | Preplay before high-stakes actions |
+| `LECE_PREPLAY_MODE` | `hybrid` | `learned` / `swarm` / `hybrid` |
+| `LECE_WORKSPACE_CONTINUOUS` | `false` | Continuous cognitive loop (replaces heartbeat when on) |
+| `LECE_ADAPTIVE_AUTONOMY` | `true` | Learned trust-calibrated autonomy |
+
+### 13.4 Guardrails
+
+- Preplay/sandbox **never** executes real writes — simulation only.
+- Adaptive autonomy **never** weakens static `AUTONOMY_LEVEL` / approval gates.
+- Distillation is off-policy + principle-level + quarantine-able (anti-collapse).
+- Tier B training is eval-gated with rollback.
 
 ---
 
@@ -1342,7 +1426,7 @@ FOUDNER_OS/
 │   ├── budget.py                # Spend cap, kill switch, cost tracking
 │   ├── trace.py                 # Per-turn flight recorder
 │   ├── store.py                 # Agent SQLite tables + accessors
-│   └── tools/                   # 107 tools across categories
+│   └── tools/                   # 117 tools across categories
 │       ├── __init__.py          # Imports all tool modules (registration) + loads generated
 │       ├── memory_tools.py      ├── brain_tools.py      ├── world_tools.py
 │       ├── crm_tools.py         ├── research_tools.py   ├── outreach_tools.py
@@ -1439,7 +1523,7 @@ you want; the agent picks the tools.
 ### 22.1 Fast local checks (no Telegram)
 
 ```bash
-# All modules import + all 107 tools register
+# All modules import + all 117 tools register
 python -c "import agent.tools, agent.core, scheduler.jobs, bot.handlers; from agent import registry; print('OK -', len(registry.all_tools()), 'tools')"
 
 # Behavior regression (side-effect-free)
@@ -1738,6 +1822,7 @@ Built incrementally, one commit per phase:
 | `feat: dashboard API + Next.js web UI` | FastAPI JSON backend (`api/`), React dashboard (`web/`), context spaces, AWS deploy docs. |
 | `feat: agent swarm — full 12-path orchestration` | Complete swarm layer (`agent/swarm/`): orchestrator-worker, dynamic handoff, fan-out/fan-in, AdaptOrch topology routing, blackboard/stigmergy, SwarmSys bio-inspired profiles, debate/maker-checker, mesh convergence, hierarchical hybrid, proactive heartbeat swarms, self-evolving skills, MCP external peers, optional LangGraph adapter, SQLite/Redis distributed workers. 10 specialists, 21 swarm tools, 100 total tools. `agent/tools/swarm_tools.py`, `tests/test_swarm.py`. |
 | `feat: self-healing control plane — 28 techniques` | Complete self-healing layer (`agent/healing/`): monitor->detect->diagnose->recover->verify loop with bounded recovery budget. Retry/backoff, 3-state circuit breakers, failure taxonomy, argument repair, tool substitution, self-healing router, stuck-loop detection, MASC metacog, adaptive replan, checkpoint/rollback, compensating transactions, DB/vector self-repair, watchdog self-test, generated-tool quarantine, swarm DLQ retry, graceful degradation, human escalation, failure ledger. 6 healing tools. `tests/test_healing.py` (20 tests). |
+| `feat: Lived-Experience Cognitive Engine (LECE)` | Complete cognitive layer (`agent/cognition/`): experiential self-distillation (principle-level, off-policy, step-wise injection), business digital twin + preplay sandbox, Global Workspace attention loop, founder theory-of-mind, trust-calibrated adaptive autonomy, Tier B LoRA training scaffold, metrics + ablation harness, Cognition dashboard panel. 10 LECE tools, 117 total. Whitepaper: `docs/LECE.md`. `tests/test_lece.py` (16 tests). |
 
 ---
 

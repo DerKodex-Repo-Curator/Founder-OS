@@ -44,7 +44,15 @@ def retrieve_context(query: str):
             lessons = []
     goals = store.list_goals("active")[:6]
     goals_block = "\n".join(f"- [{g['id']}] {g['title']} ({g.get('detail','')})" for g in goals)
-    return _block_from_hits(skills), _block_from_hits(lessons), goals_block
+    principles_block = ""
+    try:
+        from agent.cognition.principles import recall_for_turn
+        from config import config
+        if getattr(config, "lece_enabled", True):
+            principles_block = recall_for_turn(query)
+    except Exception:
+        pass
+    return _block_from_hits(skills), _block_from_hits(lessons), goals_block, principles_block
 
 
 async def reflect(user_message: str, agent_reply: str, tools_used: list = None):

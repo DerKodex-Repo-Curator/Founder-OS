@@ -147,7 +147,9 @@ without a human-approved proposal (`propose_code_change`).
 
 
 def build_system_prompt(skills_block: str = "", lessons_block: str = "",
-                        goals_block: str = "", extra_context: str = "") -> str:
+                        goals_block: str = "", extra_context: str = "",
+                        principles_block: str = "", manual_block: str = "",
+                        workspace_block: str = "", founder_block: str = "") -> str:
     from agent.safety import SYSTEM_RULE
     parts = [
         BASE_IDENTITY.format(
@@ -166,6 +168,14 @@ def build_system_prompt(skills_block: str = "", lessons_block: str = "",
         parts.append("── RELEVANT SKILLS (your saved playbooks) ──\n" + skills_block)
     if lessons_block:
         parts.append("── RELEVANT LESSONS (things you learned) ──\n" + lessons_block)
+    if principles_block:
+        parts.append("── LECE PRINCIPLES (distilled from lived experience) ──\n" + principles_block)
+    if manual_block:
+        parts.append("── PERSONALIZED OPERATING MANUAL (LECE) ──\n" + manual_block)
+    if founder_block:
+        parts.append(founder_block)
+    if workspace_block:
+        parts.append(workspace_block)
     if extra_context:
         parts.append("── FOUNDER WORLD STATE & MEMORY ──\n" + extra_context)
     return "\n\n".join(parts)

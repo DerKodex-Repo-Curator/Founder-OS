@@ -33,6 +33,7 @@ from agent.tools import (  # noqa: F401
     context_tools,
     swarm_tools,
     healing_tools,
+    cognition_tools,
 )
 
 # Load any tools the agent authored for itself in past sessions.

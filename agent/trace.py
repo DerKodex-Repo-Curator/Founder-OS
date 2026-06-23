@@ -80,6 +80,35 @@ def finish(final_text: str):
     return None
 
 
+def iter_traces(since_ts: float = 0.0, limit: int = 500) -> list:
+    """Yield traces from JSONL files, newest first. Optionally filter by epoch ts."""
+    if not os.path.isdir(TRACE_DIR):
+        return []
+    files = sorted(
+        (f for f in os.listdir(TRACE_DIR) if f.endswith(".jsonl")),
+        reverse=True,
+    )
+    out = []
+    for fname in files:
+        path = os.path.join(TRACE_DIR, fname)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception:
+            continue
+        for ln in reversed(lines):
+            if len(out) >= limit:
+                return out
+            try:
+                rec = json.loads(ln)
+            except Exception:
+                continue
+            if since_ts and rec.get("ts", 0) < since_ts:
+                continue
+            out.append(rec)
+    return out
+
+
 def recent(n: int = 5) -> list:
     """Return the last n traces from today's file (newest first)."""
     path = os.path.join(TRACE_DIR, time.strftime("%Y-%m-%d") + ".jsonl")

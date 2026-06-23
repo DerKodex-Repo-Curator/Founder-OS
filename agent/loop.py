@@ -17,6 +17,51 @@ logger = logging.getLogger(__name__)
 MAX_STEPS = 8
 
 
+def _policy_decide(tool, args: dict) -> str:
+    """Static or LECE adaptive autonomy decision."""
+    try:
+        from config import config
+        if getattr(config, "lece_enabled", True) and getattr(config, "lece_adaptive_autonomy", True):
+            from agent.cognition.trust import adaptive_decide
+            return adaptive_decide(tool, args)
+    except Exception:
+        pass
+    return policy.decide(tool, args)
+
+
+async def _execute_tool(name, args, actor, step, tool, on_status=None):
+    """Run preplay + policy gate + tool execution."""
+    from agent.cognition.preplay import maybe_preplay, record_actual_outcome, needs_preplay
+
+    preplay_meta = {}
+    if needs_preplay(name):
+        preplay_meta = await maybe_preplay(name, args)
+
+    decision = _policy_decide(tool, args)
+    if decision == "deny":
+        result = {"denied": f"Policy blocked '{name}'."}
+    elif decision == "approve":
+        check = await critic.precheck_action(name, args)
+        note = "" if check.get("ok", True) else check.get("note", "")
+        if preplay_meta and not preplay_meta.get("skipped"):
+            note = (note + f" Preplay selected branch {preplay_meta.get('selected_idx', 0)}.").strip()
+        result = approvals.enqueue(name, args, risk_note=note)
+    else:
+        result = await _healed_tool_call(name, args, actor, step)
+        log_action(actor, name, args, json.dumps(result, default=str)[:1500])
+        result = safety.wrap_tool_result(name, result)
+        record_actual_outcome(name, args, result)
+        try:
+            from agent.cognition.trust import record_outcome
+            ok = not (isinstance(result, dict) and result.get("error"))
+            record_outcome(name, ok)
+        except Exception:
+            pass
+
+    trace.add_tool_event(name, args, decision, result)
+    return result, decision
+
+
 async def _healed_llm_call(messages, schemas):
     from agent.healing.orchestrator import heal_call, healing_enabled
     if not healing_enabled():
@@ -71,6 +116,17 @@ async def execute_loop(messages: list, schemas: list, actor: str = "agent",
     history_text = ""
 
     for step in range(max_steps):
+        # Step-wise LECE principle injection
+        try:
+            from config import config
+            if getattr(config, "lece_enabled", True):
+                from agent.cognition.principles import recall_for_step
+                block = recall_for_step(history_text[-500:] or messages[-1].get("content", "")[:200])
+                if block:
+                    messages.append({"role": "system", "content": block})
+        except Exception:
+            pass
+
         try:
             resp = await _healed_llm_call(messages, schemas)
         except Exception as e:
@@ -122,33 +178,11 @@ async def execute_loop(messages: list, schemas: list, actor: str = "agent",
                     tool = registry.get(name)
                 if tool is None:
                     result = {"error": f"Unknown tool: {name}"}
+                    trace.add_tool_event(name, args, "error", result)
                 else:
-                    decision = policy.decide(tool, args)
-                    if decision == "deny":
-                        result = {"denied": f"Policy blocked '{name}'."}
-                    elif decision == "approve":
-                        check = await critic.precheck_action(name, args)
-                        note = "" if check.get("ok", True) else check.get("note", "")
-                        result = approvals.enqueue(name, args, risk_note=note)
-                    else:
-                        result = await _healed_tool_call(name, args, actor, step)
-                        log_action(actor, name, args, json.dumps(result, default=str)[:1500])
-                        result = safety.wrap_tool_result(name, result)
-                    trace.add_tool_event(name, args, decision, result)
+                    result, decision = await _execute_tool(name, args, actor, step, tool, on_status)
             else:
-                decision = policy.decide(tool, args)
-                if decision == "deny":
-                    result = {"denied": f"Policy blocked '{name}'."}
-                elif decision == "approve":
-                    check = await critic.precheck_action(name, args)
-                    note = "" if check.get("ok", True) else check.get("note", "")
-                    result = approvals.enqueue(name, args, risk_note=note)
-                else:
-                    result = await _healed_tool_call(name, args, actor, step)
-                    log_action(actor, name, args, json.dumps(result, default=str)[:1500])
-                    result = safety.wrap_tool_result(name, result)
-
-                trace.add_tool_event(name, args, decision, result)
+                result, decision = await _execute_tool(name, args, actor, step, tool, on_status)
 
             # Checkpoint after each tool action
             if turn_id:

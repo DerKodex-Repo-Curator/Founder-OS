@@ -75,6 +75,20 @@ class Config:
     healing_escalate: bool
     watchdog_enabled: bool
     watchdog_minutes: int
+    # Lived-Experience Cognitive Engine (LECE)
+    lece_enabled: bool
+    lece_distill_enabled: bool
+    lece_distill_hour: int
+    lece_distill_train: bool
+    lece_train_backend: str
+    lece_principles_k: int
+    lece_preplay_enabled: bool
+    lece_preplay_mode: str          # learned | swarm | hybrid
+    lece_preplay_branches: int
+    lece_workspace_continuous: bool
+    lece_workspace_tick_s: int
+    lece_adaptive_autonomy: bool
+    lece_trust_min_trials: int
 
 def load_config() -> Config:
     missing = []
@@ -159,6 +173,19 @@ def load_config() -> Config:
         healing_escalate=os.getenv("HEALING_ESCALATE", "true").strip().lower() in ("1", "true", "yes", "on"),
         watchdog_enabled=os.getenv("WATCHDOG_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
         watchdog_minutes=int(os.getenv("WATCHDOG_MINUTES", "30") or "30"),
+        lece_enabled=os.getenv("LECE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
+        lece_distill_enabled=os.getenv("LECE_DISTILL_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
+        lece_distill_hour=int(os.getenv("LECE_DISTILL_HOUR", "3") or "3"),
+        lece_distill_train=os.getenv("LECE_DISTILL_TRAIN", "false").strip().lower() in ("1", "true", "yes", "on"),
+        lece_train_backend=os.getenv("LECE_TRAIN_BACKEND", "peft").strip().lower(),
+        lece_principles_k=int(os.getenv("LECE_PRINCIPLES_K", "4") or "4"),
+        lece_preplay_enabled=os.getenv("LECE_PREPLAY_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
+        lece_preplay_mode=os.getenv("LECE_PREPLAY_MODE", "hybrid").strip().lower(),
+        lece_preplay_branches=int(os.getenv("LECE_PREPLAY_BRANCHES", "3") or "3"),
+        lece_workspace_continuous=os.getenv("LECE_WORKSPACE_CONTINUOUS", "false").strip().lower() in ("1", "true", "yes", "on"),
+        lece_workspace_tick_s=int(os.getenv("LECE_WORKSPACE_TICK_S", "120") or "120"),
+        lece_adaptive_autonomy=os.getenv("LECE_ADAPTIVE_AUTONOMY", "true").strip().lower() in ("1", "true", "yes", "on"),
+        lece_trust_min_trials=int(os.getenv("LECE_TRUST_MIN_TRIALS", "5") or "5"),
     )
 
 config = load_config()

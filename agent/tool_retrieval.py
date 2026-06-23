@@ -27,6 +27,9 @@ _CORE = {
     "run_swarm", "handoff_start", "handoff_to", "run_debate",
     "run_mesh", "run_blackboard", "swarm_status", "route_topology",
     "run_self_test", "health_report", "heal_now", "failure_log", "circuit_status",
+    "distill_now", "list_principles", "preplay_action", "simulate_strategy",
+    "twin_state", "why_did_you", "workspace_state", "trust_report",
+    "founder_profile", "lece_metrics",
 }
 
 _embed = None
