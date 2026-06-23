@@ -12,6 +12,7 @@ import logging
 
 from agent import registry, identity, evolution, planner, critic, trace, tool_retrieval, confidence
 from agent.loop import execute_loop
+from agent.healing.checkpoint import start_turn
 import agent.tools  # noqa: F401 — importing registers every tool
 from agent.store import set_plan_status
 from memory.vector_store import add as vec_add, search_all
@@ -43,6 +44,7 @@ async def run(user_message: str, image_context: str = "", actor: str = "user",
         return "⏸ I'm paused right now (AGENT_PAUSED is on). Turn it off to let me act again."
 
     trace.start(actor, user_message)
+    turn_id = start_turn()
     enriched = user_message
     if image_context:
         enriched += f"\n\n[IMAGE CONTENT]\n{image_context}"
@@ -102,7 +104,12 @@ async def run(user_message: str, image_context: str = "", actor: str = "user",
     tools_used = []
 
     # ── EXECUTE ────────────────────────────────────────────────────────────────
-    final_text = await execute_loop(messages, schemas, actor, on_status, tools_used)
+    try:
+        final_text = await execute_loop(messages, schemas, actor, on_status, tools_used, turn_id=turn_id)
+    except Exception as e:
+        logger.error(f"[core] execute failed: {e}")
+        from agent.healing.escalate import degrade
+        final_text = degrade(reason=str(e)[:200])
 
     # ── VERIFY + one refinement (only for deliberate turns) ────────────────────
     if deliberate and final_text and not final_text.startswith("⚠️"):
