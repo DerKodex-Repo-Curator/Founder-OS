@@ -63,6 +63,18 @@ class Config:
     swarm_worker_mode: str       # inproc | sqlite | redis
     redis_url: str
     langgraph_adapter: bool
+    # Self-healing
+    healing_enabled: bool
+    healing_max_recoveries: int
+    healing_retry_max: int
+    healing_backoff_base_ms: int
+    circuit_fail_threshold: int
+    circuit_cooldown_s: int
+    healing_metacog: bool
+    healing_auto_replan: bool
+    healing_escalate: bool
+    watchdog_enabled: bool
+    watchdog_minutes: int
 
 def load_config() -> Config:
     missing = []
@@ -136,6 +148,17 @@ def load_config() -> Config:
         swarm_worker_mode=os.getenv("SWARM_WORKER_MODE", "sqlite").strip().lower(),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0").strip(),
         langgraph_adapter=os.getenv("LANGGRAPH_ADAPTER", "false").strip().lower() in ("1", "true", "yes", "on"),
+        healing_enabled=os.getenv("HEALING_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
+        healing_max_recoveries=int(os.getenv("HEALING_MAX_RECOVERIES", "4") or "4"),
+        healing_retry_max=int(os.getenv("HEALING_RETRY_MAX", "3") or "3"),
+        healing_backoff_base_ms=int(os.getenv("HEALING_BACKOFF_BASE_MS", "200") or "200"),
+        circuit_fail_threshold=int(os.getenv("CIRCUIT_FAIL_THRESHOLD", "5") or "5"),
+        circuit_cooldown_s=int(os.getenv("CIRCUIT_COOLDOWN_S", "30") or "30"),
+        healing_metacog=os.getenv("HEALING_METACOG", "true").strip().lower() in ("1", "true", "yes", "on"),
+        healing_auto_replan=os.getenv("HEALING_AUTO_REPLAN", "true").strip().lower() in ("1", "true", "yes", "on"),
+        healing_escalate=os.getenv("HEALING_ESCALATE", "true").strip().lower() in ("1", "true", "yes", "on"),
+        watchdog_enabled=os.getenv("WATCHDOG_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on"),
+        watchdog_minutes=int(os.getenv("WATCHDOG_MINUTES", "30") or "30"),
     )
 
 config = load_config()

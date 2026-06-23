@@ -188,6 +188,48 @@ def init_agent_db():
             content TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS failures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor TEXT,
+            kind TEXT,
+            failure_class TEXT,
+            signal TEXT,
+            tool_name TEXT,
+            diagnosis TEXT,
+            recovery_action TEXT,
+            recovered INTEGER DEFAULT 0,
+            trace_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS circuit_state (
+            key TEXT PRIMARY KEY,
+            state TEXT DEFAULT 'closed',
+            fail_count INTEGER DEFAULT 0,
+            opened_at REAL,
+            last_probe REAL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            turn_id TEXT NOT NULL,
+            step INTEGER,
+            snapshot_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS healing_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trace_id TEXT,
+            step INTEGER,
+            failure_class TEXT,
+            action TEXT,
+            outcome TEXT,
+            cost_ms INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """
     )
     # Migrate older usage_daily rows that predate token/cost columns.
@@ -791,6 +833,135 @@ def get_swarm_messages(run_id: int, limit: int = 50) -> list:
     rows = conn.execute(
         "SELECT * FROM swarm_messages WHERE run_id = ? ORDER BY id DESC LIMIT ?",
         (run_id, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── SELF-HEALING ──────────────────────────────────────────────────────────────
+
+def log_failure(actor: str, kind: str, failure_class: str, signal: str,
+                tool_name: str = "", diagnosis: str = "", recovery_action: str = "",
+                recovered: bool = False, trace_id: str = ""):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO failures (actor, kind, failure_class, signal, tool_name, diagnosis, "
+        "recovery_action, recovered, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (actor, kind, failure_class, signal, tool_name, diagnosis, recovery_action,
+         1 if recovered else 0, trace_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_failures(limit: int = 50) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM failures ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def recall_failures(tool_name: str = "", failure_class: str = "", limit: int = 5) -> list:
+    conn = get_conn()
+    q = "SELECT * FROM failures WHERE 1=1"
+    params = []
+    if tool_name:
+        q += " AND tool_name = ?"
+        params.append(tool_name)
+    if failure_class:
+        q += " AND failure_class = ?"
+        params.append(failure_class)
+    q += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def upsert_circuit_state(key: str, state: str, fail_count: int, opened_at: float = None):
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO circuit_state (key, state, fail_count, opened_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET
+             state = ?, fail_count = ?, opened_at = ?, updated_at = ?""",
+        (key, state, fail_count, opened_at, datetime.now().isoformat(),
+         state, fail_count, opened_at, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_circuit_state(key: str) -> Optional[dict]:
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM circuit_state WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_circuit_states() -> list:
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM circuit_state ORDER BY updated_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_checkpoint(turn_id: str, step: int, snapshot_json: str) -> int:
+    conn = get_conn()
+    cur = conn.execute(
+        "INSERT INTO checkpoints (turn_id, step, snapshot_json) VALUES (?, ?, ?)",
+        (turn_id, step, snapshot_json),
+    )
+    conn.commit()
+    cid = cur.lastrowid
+    conn.close()
+    return cid
+
+
+def get_latest_checkpoint(turn_id: str) -> Optional[dict]:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM checkpoints WHERE turn_id = ? ORDER BY id DESC LIMIT 1",
+        (turn_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_checkpoints(turn_id: str, compensation_only: bool = False) -> list:
+    conn = get_conn()
+    if compensation_only:
+        rows = conn.execute(
+            "SELECT * FROM checkpoints WHERE turn_id = ? AND step = -1 ORDER BY id DESC",
+            (turn_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM checkpoints WHERE turn_id = ? ORDER BY id DESC",
+            (turn_id,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def log_healing_event(trace_id: str, step: int, failure_class: str, action: str,
+                      outcome: str, cost_ms: int = 0):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO healing_events (trace_id, step, failure_class, action, outcome, cost_ms) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (trace_id, step, failure_class, action, outcome, cost_ms),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_healing_events(limit: int = 50) -> list:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM healing_events ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
