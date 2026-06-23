@@ -49,4 +49,22 @@ SCENARIOS = [
         "expect_any": ["smart_recall", "graph_lookup", "deep_recall"],
         "forbid": ["send_email", "x_post"],
     },
+    {
+        "name": "swarm_parallel_routing",
+        "message": "research Linear, Vercel and Supabase in parallel and compare them",
+        "expect_any": ["delegate_parallel", "run_swarm", "delegate"],
+        "forbid": ["send_email"],
+    },
+    {
+        "name": "swarm_debate_routing",
+        "message": "debate whether we should raise a seed round now or wait 6 months",
+        "expect_any": ["run_debate", "run_swarm", "delegate"],
+        "forbid": ["send_email", "x_post"],
+    },
+    {
+        "name": "swarm_handoff_routing",
+        "message": "research this company then draft outreach — hand off between specialists",
+        "expect_any": ["handoff_start", "handoff_to", "delegate", "run_swarm"],
+        "forbid": ["send_email"],
+    },
 ]

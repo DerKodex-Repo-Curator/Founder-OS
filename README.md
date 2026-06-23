@@ -15,7 +15,7 @@
 > looks after your goals — all behind a human approval gate for anything risky.
 
 Founder OS is not a chatbot. It is an **autonomous agent**: you tell it an outcome, and
-it decides which of its **76 tools** to call (retrieving only the relevant ones per turn
+it decides which of its **100 tools** to call (retrieving only the relevant ones per turn
 via Tool-RAG), chains them, verifies its own work, and
 gets things done — then quietly improves itself for next time.
 
@@ -26,7 +26,7 @@ gets things done — then quietly improves itself for next time.
 - **True agentic loop** — not intent-routing. The model sees the full tool catalog and decides what to do (ReAct-style tool calling), with a **Plan → Execute → Verify** pipeline on top.
 - **Self-evolving** — it distills lessons, saves reusable skills, rewrites its own operating manual, and can even **author brand-new tools for itself** at runtime (Voyager-style), all behind approval.
 - **A real memory brain** — vector + relational + a **knowledge graph**, with **hybrid retrieval** (dense + BM25 + optional reranker), episodic recall weighted by recency/importance, and **nightly consolidation** ("sleep").
-- **Multi-agent** — a supervisor that **delegates** focused work to specialist sub-agents (researcher, outreach, ops, analyst), in parallel when useful.
+- **Multi-agent swarm** — a supervisor that **delegates** to 10 specialist sub-agents, with **12 orchestration paths**: parallel fan-out, dynamic handoff, debate, mesh, blackboard/stigmergy, bio-inspired SwarmSys, hierarchical hybrid, proactive heartbeat swarms, self-evolving skills, MCP external peers, optional LangGraph adapter, and distributed SQLite/Redis workers.
 - **Perception** — reads your inbox (IMAP), renders JS-heavy web pages (headless browser), transcribes voice notes (local Whisper), parses PDFs/DOCX, and runs topic monitors.
 - **Safety-first autonomy** — an inviolable **constitution**, **prompt-injection defense**, **tiered autonomy** (cautious/balanced/autonomous), an **approval gate**, **spend caps**, and a **kill switch**.
 - **Observable** — a per-turn **flight recorder** (tracing), token/cost tracking, a **self-eval harness** with a tracked pass rate, and a **replay** tool.
@@ -43,7 +43,7 @@ gets things done — then quietly improves itself for next time.
 5. [Quickstart & setup](#5-quickstart--setup)
 6. [Configuration reference (.env)](#6-configuration-reference-env)
 7. [The agentic core in depth](#7-the-agentic-core-in-depth)
-8. [The complete tool catalog (76 tools)](#8-the-complete-tool-catalog-76-tools)
+8. [The complete tool catalog (100 tools)](#8-the-complete-tool-catalog-100-tools)
 9. [The memory brain](#9-the-memory-brain)
 10. [Self-evolution](#10-self-evolution)
 11. [Multi-agent orchestration](#11-multi-agent-orchestration)
@@ -519,6 +519,19 @@ All configuration is read in `config.py` into a typed `Config` dataclass. Only
 | `TOOL_RAG_K` | `16` | How many tools to retrieve before adding the always-on core set. |
 | `RUN_LLM_EVALS` | `false` | When `1`/`true` (and an API key is set), the opt-in LLM-as-judge quality evals run in the pytest suite (`tests/test_evals_quality.py`). |
 
+### Agent swarm
+
+| Variable | Default | Description |
+|---|---|---|
+| `SWARM_ENABLED` | `true` | Master switch for multi-agent swarm orchestration. |
+| `SWARM_MAX_AGENTS` | `5` | Max concurrent sub-agents per swarm run. |
+| `SWARM_MAX_ROUNDS` | `10` | Max rounds for mesh/blackboard/debate loops. |
+| `SWARM_MAX_HANDOFFS` | `5` | Max dynamic handoffs per session (loop protection). |
+| `DEBATE_ROUNDS` | `2` | Default rounds for multi-agent debate. |
+| `SWARM_WORKER_MODE` | `sqlite` | Job queue mode: `inproc`, `sqlite`, or `redis`. |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis URL when `SWARM_WORKER_MODE=redis`. |
+| `LANGGRAPH_ADAPTER` | `false` | Enable optional LangGraph adapter (`pip install langgraph`). |
+
 ### Google Calendar (optional)
 
 | Variable | Default | Description |
@@ -587,7 +600,7 @@ manual and re-injected forever after.
 
 ---
 
-## 8. The complete tool catalog (76 tools)
+## 8. The complete tool catalog (100 tools)
 
 Tools are grouped by `category`. **Yes** in the Approval column means the tool is
 approval-gated (won't run until you approve, unless `AUTONOMY_LEVEL=autonomous` /
@@ -838,21 +851,86 @@ by hand. This is a deliberate hard safety boundary, reinforced by the constituti
 
 ---
 
-## 11. Multi-agent orchestration
+## 11. Multi-agent swarm orchestration
 
-The top-level agent is a **supervisor** (`agent/subagent.py`). For focused chunks of work it
-hands off to specialist sub-agents, each running the *same* executor loop with a **narrowed
-toolset** and a role-specific brief:
+Founder OS implements a **full agent swarm layer** (`agent/swarm/`) with all 12 orchestration paths and every modern technique: orchestrator-worker, dynamic handoff, fan-out/fan-in, adaptive topology (AdaptOrch), stigmergy/blackboard, bio-inspired SwarmSys, debate/maker-checker, mesh convergence, hierarchical hybrid, MCP external peers, proactive heartbeat swarms, self-evolving skills, optional LangGraph adapter, and distributed workers.
 
-| Specialist | Tool categories | Brief |
+```mermaid
+flowchart TD
+    User[User/Telegram] --> Supervisor[AgentCore Supervisor]
+    Supervisor --> TopologyRouter[AdaptOrch Topology Router]
+    TopologyRouter --> Path1[Path1: Orchestrator-Worker]
+    TopologyRouter --> Path2[Path2: Dynamic Handoff]
+    TopologyRouter --> Path3[Path3: Blackboard/Stigmergy]
+    TopologyRouter --> Path4[Path4: SwarmSys Bio-Inspired]
+    TopologyRouter --> Path5[Path5: Debate/Maker-Checker]
+    TopologyRouter --> Path6[Path6: Mesh Convergence]
+    TopologyRouter --> Path7[Path7: Hierarchical Hybrid]
+    Path1 --> ExecuteLoop[execute_loop shared executor]
+    Path2 --> ExecuteLoop
+    Path3 --> ExecuteLoop
+    Path4 --> ExecuteLoop
+    Path5 --> ExecuteLoop
+    Path6 --> ExecuteLoop
+    Path7 --> ExecuteLoop
+    ExecuteLoop --> Verify[Critic Verify]
+    Verify --> Reply[Reply to Founder]
+```
+
+### 11.1 Specialist sub-agents (`agent/subagent.py`)
+
+The top-level agent is a **supervisor**. For focused chunks of work it hands off to specialist
+sub-agents, each running the *same* `execute_loop` with a **narrowed toolset** and role brief:
+
+| Specialist | Tool categories | Role |
 |---|---|---|
-| `researcher` | research, perception (+memory) | Gather accurate, well-sourced info; never invent facts. |
-| `outreach` | outreach, crm (+memory) | Draft sharp personalized messages; manage CRM; sending stays gated. |
-| `ops` | tasks, reminders, calendar, goals (+memory) | Scheduling, reminders, tasks, calendar, goals — confirm concrete times. |
-| `analyst` | research, evolution (+memory) | Reason over info + memory to produce judgments and recommendations. |
+| `researcher` | research, perception | Gather accurate, well-sourced info; never invent facts. |
+| `outreach` | outreach, crm | Draft sharp personalized messages; manage CRM; sending stays gated. |
+| `ops` | tasks, reminders, calendar, goals | Scheduling, reminders, tasks, calendar, goals. |
+| `analyst` | research, evolution | Reason over info + memory; judgments and recommendations. |
+| `fundraising` | research, crm, outreach | Investor research, pipeline, pitch materials. |
+| `competitive_intel` | research, perception | Competitor mapping, pricing, positioning. |
+| `content` | outreach, social, evolution | Blog posts, social threads, newsletters, landing copy. |
+| `legal_ops` | research, tasks | Contracts, compliance deadlines (not legal advice). |
+| `growth` | research, crm, outreach, goals | Growth experiments, funnel optimization. |
+| `finance` | finance, research, chart | Runway, burn, MRR, unit economics. |
 
-- **`delegate`** — one handoff.
-- **`delegate_parallel`** — fan out several handoffs concurrently (`asyncio.gather`) — e.g. research three companies at once and compare.
+- **`delegate`** — one handoff to a specialist.
+- **`delegate_parallel`** — fan out several handoffs concurrently (`asyncio.gather`).
+
+### 11.2 The 12 swarm paths
+
+| Path | Technique | Module | Key tools |
+|---|---|---|---|
+| **1** | Orchestrator-worker + fan-out/fan-in + AdaptOrch topology | `agent/swarm/runner.py`, `topology.py` | `run_swarm`, `swarm_aggregate`, `route_topology` |
+| **2** | Dynamic handoff (OpenAI Swarm style) | `agent/swarm/handoff.py` | `handoff_start`, `handoff_to` |
+| **3** | Blackboard / stigmergy (bMAS control unit) | `agent/swarm/board.py` | `run_blackboard`, `board_post`, `board_read` |
+| **4** | Bio-inspired SwarmSys (explorer/worker/validator + pheromone) | `agent/swarm/profiles.py` | `assign_swarm_agent`, `run_swarmsys`, `list_swarm_profiles` |
+| **5** | Multi-agent debate + maker-checker | `agent/swarm/debate.py` | `run_debate`, `run_maker_checker` |
+| **6** | Mesh artifact convergence | `agent/swarm/mesh.py` | `run_mesh` |
+| **7** | Hierarchical hybrid (nested delegation) | `agent/swarm/hierarchy.py` | `run_hierarchical_swarm` |
+| **8** | External swarm via MCP | `mcp_server.py` | All swarm tools exposed to Cursor/Claude |
+| **9** | Proactive heartbeat swarms | `agent/swarm/proactive.py`, `scheduler/jobs.py` | `run_proactive_swarm` |
+| **10** | Self-evolving swarm (Voyager + skills) | `agent/swarm/evolve.py` | `run_evolve_swarm` |
+| **11** | Optional LangGraph adapter | `agent/swarm/adapters/langgraph_adapter.py` | `run_langgraph_swarm` |
+| **12** | Distributed workers (SQLite / Redis) | `agent/swarm/workers/` | `enqueue_swarm_job` |
+
+### 11.3 Guardrails
+
+Every swarm agent runs through **`execute_loop`** — policy, approvals, injection defense, and tracing are never bypassed. Hard limits: `SWARM_MAX_AGENTS`, `SWARM_MAX_ROUNDS`, `SWARM_MAX_HANDOFFS`, `DAILY_LLM_CALL_CAP`. Handoff loop detection prevents infinite chains. Swarm orchestration tools are in the Tool-RAG `_CORE` set so they're never hidden.
+
+### 11.4 Swarm configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SWARM_ENABLED` | `true` | Master switch for swarm orchestration. |
+| `SWARM_MAX_AGENTS` | `5` | Max concurrent sub-agents per swarm run. |
+| `SWARM_MAX_ROUNDS` | `10` | Max rounds for mesh/blackboard/debate. |
+| `SWARM_MAX_HANDOFFS` | `5` | Max dynamic handoffs per session. |
+| `DEBATE_ROUNDS` | `2` | Default debate rounds. |
+| `SWARM_WORKER_MODE` | `sqlite` | `inproc` \| `sqlite` \| `redis` job queue. |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis queue URL (optional). |
+| `LANGGRAPH_ADAPTER` | `false` | Enable optional LangGraph adapter (`pip install langgraph`). |
 
 Sub-agents share the same memory brain, so everything they learn or write is centralized.
 
@@ -1143,7 +1221,7 @@ FOUDNER_OS/
 │   ├── budget.py                # Spend cap, kill switch, cost tracking
 │   ├── trace.py                 # Per-turn flight recorder
 │   ├── store.py                 # Agent SQLite tables + accessors
-│   └── tools/                   # 76 tools across categories
+│   └── tools/                   # 100 tools across categories
 │       ├── __init__.py          # Imports all tool modules (registration) + loads generated
 │       ├── memory_tools.py      ├── brain_tools.py      ├── world_tools.py
 │       ├── crm_tools.py         ├── research_tools.py   ├── outreach_tools.py
@@ -1240,7 +1318,7 @@ you want; the agent picks the tools.
 ### 22.1 Fast local checks (no Telegram)
 
 ```bash
-# All modules import + all 76 tools register
+# All modules import + all 100 tools register
 python -c "import agent.tools, agent.core, scheduler.jobs, bot.handlers; from agent import registry; print('OK -', len(registry.all_tools()), 'tools')"
 
 # Behavior regression (side-effect-free)
@@ -1536,6 +1614,8 @@ Built incrementally, one commit per phase:
 | `feat: GraphRAG global queries` | Community detection (label propagation) over the knowledge graph + LLM-generated cluster summaries, map-reduced to answer big-picture questions about the founder's network via `ask_network`; rebuilt nightly. `memory/graphrag.py`. |
 | `feat: MCP server` | `mcp_server.py` exposes every tool over the Model Context Protocol so any MCP client (Claude Desktop, Cursor) can drive Founder OS — with approval-gated actions still routed through the Telegram approval queue, so external clients can propose but not unilaterally send. |
 | `feat: LLM-as-judge evals` | A rubric-based judge scores answer quality and safety (drafting, abstention, fraud refusal, approval-gate respect); opt-in CI gate (`RUN_LLM_EVALS=1`) guarding self-evolution, with the harness itself unit-tested offline. `evals/judge.py`, `evals/quality_runner.py`. |
+| `feat: dashboard API + Next.js web UI` | FastAPI JSON backend (`api/`), React dashboard (`web/`), context spaces, AWS deploy docs. |
+| `feat: agent swarm — full 12-path orchestration` | Complete swarm layer (`agent/swarm/`): orchestrator-worker, dynamic handoff, fan-out/fan-in, AdaptOrch topology routing, blackboard/stigmergy, SwarmSys bio-inspired profiles, debate/maker-checker, mesh convergence, hierarchical hybrid, proactive heartbeat swarms, self-evolving skills, MCP external peers, optional LangGraph adapter, SQLite/Redis distributed workers. 10 specialists, 21 swarm tools, 100 total tools. `agent/tools/swarm_tools.py`, `tests/test_swarm.py`. |
 
 ---
 
