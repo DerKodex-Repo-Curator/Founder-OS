@@ -16,6 +16,7 @@ import os
 import re
 
 GENERATED_DIR = os.path.join(os.path.dirname(__file__), "tools", "generated")
+QUARANTINE_DIR = os.path.join(GENERATED_DIR, "_quarantine")
 
 ALLOWED_IMPORTS = {
     "json", "re", "math", "datetime", "statistics", "time", "random",
@@ -93,6 +94,8 @@ def load_generated():
     if not os.path.isdir(GENERATED_DIR):
         return 0
     count = 0
+    quarantined = 0
+    os.makedirs(QUARANTINE_DIR, exist_ok=True)
     for fname in os.listdir(GENERATED_DIR):
         if fname.endswith(".py") and fname != "__init__.py":
             name = fname[:-3]
@@ -102,6 +105,14 @@ def load_generated():
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
                 count += 1
-            except Exception:
-                pass
+            except Exception as e:
+                # Quarantine broken generated tools so they don't crash startup
+                try:
+                    import shutil
+                    src = os.path.join(GENERATED_DIR, fname)
+                    dst = os.path.join(QUARANTINE_DIR, fname)
+                    shutil.move(src, dst)
+                    quarantined += 1
+                except Exception:
+                    pass
     return count

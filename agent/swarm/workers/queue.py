@@ -59,6 +59,33 @@ def complete_job(job_id: str, result: str, status: str = "done"):
     store.finish_swarm_job(job_id, status, result[:4000])
 
 
+def list_failed_jobs(limit: int = 10) -> list:
+    from memory.sql_store import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM swarm_jobs WHERE status = 'failed' ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+async def retry_failed_jobs(max_jobs: int = 3) -> int:
+    """Re-queue failed swarm jobs with backoff (dead-letter retry)."""
+    import json
+    failed = list_failed_jobs(max_jobs)
+    retried = 0
+    for job in failed:
+        try:
+            payload = json.loads(job.get("payload_json") or "{}")
+            new_id = enqueue_job(job["job_type"], payload, priority=3)
+            store.finish_swarm_job(job["job_id"], "retried", f"requeued as {new_id}")
+            retried += 1
+        except Exception:
+            pass
+    return retried
+
+
 async def run_job(job: dict) -> dict:
     """Execute a dequeued swarm job."""
     from agent.swarm.runner import run_swarm

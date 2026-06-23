@@ -296,6 +296,36 @@ async def job_heartbeat():
         logger.error(f"Heartbeat failed: {e}")
 
 
+async def job_watchdog():
+    """Periodic self-test and auto-remediation."""
+    if _paused():
+        return
+    from config import config
+    if not getattr(config, "watchdog_enabled", True):
+        return
+    logger.info("[Scheduler] Watchdog self-test")
+    try:
+        from agent.healing.watchdog import watchdog_tick
+        result = await watchdog_tick()
+        if result.get("remediation"):
+            logger.info(f"[Scheduler] Watchdog remediated: {result['remediation']}")
+    except Exception as e:
+        logger.error(f"Watchdog failed: {e}")
+
+
+async def job_swarm_dlq_retry():
+    """Retry failed swarm jobs from dead-letter queue."""
+    if _paused():
+        return
+    try:
+        from agent.swarm.workers.queue import retry_failed_jobs
+        retried = await retry_failed_jobs(max_jobs=3)
+        if retried:
+            logger.info(f"[Scheduler] Retried {retried} failed swarm job(s)")
+    except Exception as e:
+        logger.debug(f"[Scheduler] Swarm DLQ retry skipped: {e}")
+
+
 # ── START ─────────────────────────────────────────────────────────────────────
 
 def start_scheduler(app) -> AsyncIOScheduler:
@@ -316,8 +346,16 @@ def start_scheduler(app) -> AsyncIOScheduler:
         job_heartbeat, CronTrigger(hour=f"9-21/{hours}", minute=0), id="heartbeat"
     )
 
+    wd_min = max(5, int(getattr(config, "watchdog_minutes", 30) or 30))
+    _scheduler.add_job(
+        job_watchdog, CronTrigger(minute=f"*/{wd_min}"), id="watchdog"
+    )
+    _scheduler.add_job(
+        job_swarm_dlq_retry, CronTrigger(minute="*/15"), id="swarm_dlq_retry"
+    )
+
     _scheduler.start()
     load_pending_reminders()
     logger.info(f"[Scheduler] Started. Briefing 08:00, follow-ups 10:00, backup 02:00, "
-                f"consolidation 03:00, heartbeat every {hours}h (9-21).")
+                f"consolidation 03:00, heartbeat every {hours}h (9-21), watchdog every {wd_min}m.")
     return _scheduler
