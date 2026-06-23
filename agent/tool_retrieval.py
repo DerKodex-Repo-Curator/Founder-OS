@@ -26,6 +26,7 @@ _CORE = {
     "delegate", "delegate_parallel", "about_self",
     "run_swarm", "handoff_start", "handoff_to", "run_debate",
     "run_mesh", "run_blackboard", "swarm_status", "route_topology",
+    "run_self_test", "health_report", "heal_now", "failure_log", "circuit_status",
 }
 
 _embed = None
