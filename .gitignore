@@ -15,3 +15,5 @@ venv/
 *.plan.md
 .git/COMMIT_MSG.txt
 FOUNDER_OS_CAPABILITIES.txt
+docs/blog/*.md
+research/
